@@ -19,13 +19,13 @@ function validateData(array $data, array $rules, \Redis $redis)
 
             switch ($ruleName) {
                 case 'required':
-                    if (!isset($data[$field])) {
+                    if (! isset($data[$field])) {
                         $errors[] = "$field is required.";
                     }
                     break;
 
                 case 'string':
-                    if (isset($data[$field]) && !is_string($data[$field])) {
+                    if (isset($data[$field]) && ! is_string($data[$field])) {
                         $errors[] = "$field invalid type.";
                     }
                     break;
@@ -39,26 +39,25 @@ function validateData(array $data, array $rules, \Redis $redis)
                 case 'date_format':
                     if (isset($data[$field])) {
                         $date = \DateTime::createFromFormat($ruleValue, $data[$field]);
-                        if (!$date || $date->format($ruleValue) !== $data[$field]) {
+                        if (! $date || $date->format($ruleValue) !== $data[$field]) {
                             $errors[] = "$field must be a valid date in format $ruleValue.";
                         }
                     }
                     break;
 
                 case 'sometimes':
-                    if (!isset($data[$field])) {
-                        continue 2; // Skip other rules for this field
+                    if (! isset($data[$field])) {
+                        continue 2;
                     }
                     break;
 
                 case 'array':
-                    if (isset($data[$field]) && !is_array($data[$field])) {
+                    if (isset($data[$field]) && ! is_array($data[$field])) {
                         $errors[] = "$field must be an array.";
                     }
                     break;
 
                 case 'nullable':
-                    // Allow null values, no validation needed
                     break;
 
                 case 'redis_unique':
@@ -69,21 +68,9 @@ function validateData(array $data, array $rules, \Redis $redis)
                 case 'array_of_strings':
                     if (isset($data[$field]) && is_array($data[$field])) {
                         foreach ($data[$field] as $value) {
-                            if (isset($value) && !is_string($value)) {
+                            if (isset($value) && ! is_string($value)) {
                                 $errors[] = "$field invalid type.";
                             }
-                        }
-                    }
-                    break;
-
-                default:
-                    if (is_callable($rule)) {
-                        try {
-                            $rule($field, $data[$field], function ($message) use (&$errors) {
-                                $errors[] = $message;
-                            });
-                        } catch (\InvalidArgumentException $e) {
-                            $errors[] = $e->getMessage();
                         }
                     }
                     break;
@@ -95,76 +82,66 @@ function validateData(array $data, array $rules, \Redis $redis)
         return $errors;
     }
 
-    return null; // Validation passed
+    return null;
 }
 
-try {
-    // Check if the request method is POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        sendJsonResponse(['error' => 'Only POST requests are allowed.'], 405);
-    }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    sendJsonResponse(['error' => 'Only POST requests are allowed.'], 405);
+}
 
-    // Get the JSON data from the request body
-    $requestData = json_decode(file_get_contents('php://input'), true);
-    if (! $requestData) {
-        sendJsonResponse(['error' => 'Invalid JSON data.'], 400);
-    }
+$requestData = json_decode(file_get_contents('php://input'), true);
+if (! $requestData) {
+    sendJsonResponse(['error' => 'Invalid JSON data.'], 400);
+}
 
-    $redisInstance = RedisConnection::getInstance();
-    $redis = $redisInstance->getConnection();
+$redisInstance = RedisConnection::getInstance();
+$redis = $redisInstance->getConnection();
 
-    $errors = validateData(
-        $requestData,
-        [
-            'apelido' => [
-                'required',
-                'string',
-                'max:32',
-                'redis_unique',
-            ],
-            'nome' => ['required', 'string', 'max:100'],
-            'nascimento' => ['required', 'date_format:Y-m-d'],
-            'stack' => ['sometimes', 'array', 'nullable', 'array_of_strings'],
+$errors = validateData(
+    $requestData,
+    [
+        'apelido' => [
+            'required',
+            'string',
+            'max:32',
+            'redis_unique',
         ],
-        $redis
-    );
-    if ($errors) {
-        foreach ($errors as $error) {
-            if (strpos($error, 'invalid type') === 0) {
-                sendJsonResponse(['error' => $error], 400);
-            } else {
-                sendJsonResponse(['error' => $error], 422);
-            }
+        'nome' => ['required', 'string', 'max:100'],
+        'nascimento' => ['required', 'date_format:Y-m-d'],
+        'stack' => ['sometimes', 'array', 'nullable', 'array_of_strings'],
+    ],
+    $redis
+);
+if ($errors) {
+    foreach ($errors as $error) {
+        if (strpos($error, 'invalid type') === 0) {
+            sendJsonResponse(['error' => $error], 400);
+        } else {
+            sendJsonResponse(['error' => $error], 422);
         }
     }
-
-    // Generate a UUID for the person
-    $uuid = uniqid();
-
-    // Person Data
-    $personData = [
-        'uuid' => $uuid,
-        'nickname' => $requestData['apelido'],
-        'name' => $requestData['nome'],
-        'date_of_birth' => $requestData['nascimento'],
-        'stack' => json_encode($requestData['stack']),
-    ];
-
-    $encodedPersonData = json_encode($personData);
-
-    // Publish the message to the channel
-    $redis->publish('create:person:' . gethostname(), $encodedPersonData);
-    $redis->set('person:' . $personData['uuid'], $encodedPersonData);
-    $redis->set('person:' . $personData['nickname'], $encodedPersonData);
-
-    sendJsonResponse(
-        ['message' => 'Person inserted successfully.'],
-        201,
-        [
-            'Location' => '/pessoas/' . $uuid
-        ]
-    );
-} catch (\PDOException $e) {
-    fwrite(fopen('php://stderr', 'wb'), $e->getMessage());
-    sendJsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
 }
+
+$uuid = uniqid();
+
+$personData = [
+    'uuid' => $uuid,
+    'nickname' => $requestData['apelido'],
+    'name' => $requestData['nome'],
+    'date_of_birth' => $requestData['nascimento'],
+    'stack' => json_encode($requestData['stack']),
+];
+
+$encodedPersonData = json_encode($personData);
+
+$redis->publish('create:person:' . gethostname(), $encodedPersonData);
+$redis->set('person:' . $personData['uuid'], $encodedPersonData);
+$redis->set('person:' . $personData['nickname'], $encodedPersonData);
+
+sendJsonResponse(
+    ['message' => 'Person inserted successfully.'],
+    201,
+    [
+        'Location' => '/pessoas/' . $uuid
+    ]
+);
